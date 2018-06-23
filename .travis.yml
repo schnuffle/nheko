@@ -22,7 +22,6 @@ matrix:
         packages:
         - g++-5
         - ninja-build
-before_install:
 - export CXX=${CXX_COMPILER}
 - export CC=${C_COMPILER}
 install:
@@ -32,16 +31,18 @@ script:
 - "./.ci/script.sh"
 - sed -i -e "s/VERSION_NAME_VALUE/${TRAVIS_TAG}/g" ./.ci/bintray-release.json || true
 - cp ./.ci/bintray-release.json .
+
+before_deploy:
+- openssl aes-256-cbc -K $encrypted_f98da79ae277_key -iv $encrypted_f98da79ae277_iv -in deploy_rsa.enc -out /tmp/deploy_rsa -d
+- eval "$(ssh-agent -s)"
+- chmod 600 /tmp/deploy_rsa
+- ssh-add /tmp/deploy_rsa
 deploy:
   matrix:
-  - provider: bintray
-    user: schnuffle
-    key:
-      secure: bSpCKJ+y+Y+R9fS2ViPjzEeqIR0920tRp442lgz9G0vQoSJMJdmzs+/rppa1IJHXQtoHqMIj0Ayq0MqByYrOYcn/A3T3KvZlg8cIA0M/baP3lUkWmIHnLxfRwxt8FG4CHi7NacmXrVQICvS3GZ/CzA2C3uT//t6lJUBNI7/ADf7pLm0RWatlPnchDnOtfrhI765c/m4ZNnUdfRg53UWguhNz3MDwfuSEOAez2YAycIVSCwk1yOO6m0gAq9UaxdbO5+OieF2gXWm6EHxaeRnjcqPprb4xJh8M2v27al21e5J6b662UMjFl/xuKFn5LIqLZw8SKXviOUlq4J1CHd93+VgeVrVIAAn+2eZKcZ/mmGNJmmohmcllt/30ewtf26GjHNlG4z4pNSyMBkjm9ooCpXyJjcZBXL8fHgL6U6WM3/yGtrF1T3Fi6BHd/8GW3m2qexnJhWXA+nc47d9kLF2u4nPjYKYK2mrWjMJClh3s7JDbCUPPgmNoAw32TjdAzNB9kNpM5gXixGgZJqrMHqxfy5EdnVHsih4YoV6E3duzVAlyi8Rzd9iO0tPz2FfHPoc22ioiQpRwODInPvAOklRk3+9S0bzO2YpvbdXKdg6oYxlEc4/GPQVklUoVXhH0xx5S5mQvL+wthonRaobjjqo1dTSt1Y1l2x1Wj0lsSBnnGBc=
+    provider: script
     skip_cleanup: true
+    script: rsync -r --delete-after --quiet $TRAVIS_BUILD_DIR/<dir> travis@kolab.schnuffle.de:~/
     overwrite: true
-    file: bintray-release.json
     on:
       condition: "$DEPLOYMENT == 1"
-      repo: schnuffle/nheko
       tags: true
