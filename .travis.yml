@@ -16,7 +16,6 @@ matrix:
     - USE_BUNDLED_BOOST=1
     - USE_BUNDLED_SPDLOG=1
     addons:
-      ssh_kown_hosts: kolab.schnuffle.de
       apt:
         sources:
         - ubuntu-toolchain-r-test
@@ -27,6 +26,7 @@ before_install:
   - export CXX=${CXX_COMPILER}
   - export CC=${C_COMPILER}
 install:
+  - echo '|1|YTXcI9F2+bVFKIz6sren2fg+Pwo=|00A151UHFKKbcNs66zsNTP/dfSQ= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKt/a6oi8ONIPVoBoBdxmnMDyE1G2HRacaEnLKoL21HzWjSzak5urj4t2qayErdI7OnPUPqMH0bbIEONK9lKkJo=' >> $HOME/.ssh/known_hosts
   - "./.ci/install.sh"
   - export PATH=/usr/local/bin:${PATH}
 script:
