@@ -1,97 +1,50 @@
----
-
 language: cpp
 sudo: required
 dist: trusty
-
 notifications:
-    email: false
-
+  email: false
 matrix:
-    include:
-        - os: osx
-          osx_image: xcode9
-          compiler: clang
-          env:
-              - DEPLOYMENT=1
-              - USE_BUNDLED_BOOST=0
-              - USE_BUNDLED_SPDLOG=0
-        - os: linux
-          compiler: gcc
-          env:
-              - CXX_COMPILER=g++-5
-              - C_COMPILER=gcc-5
-              - QT_VERSION="-5.10.1"
-              - QT_PKG=510
-              - DEPLOYMENT=1
-              - USE_BUNDLED_BOOST=1
-              - USE_BUNDLED_SPDLOG=1
-          addons:
-              apt:
-                  sources: ["ubuntu-toolchain-r-test"]
-                  packages: ["g++-5", "ninja-build"]
-        - os: linux
-          compiler: gcc
-          env:
-              - CXX_COMPILER=g++-7
-              - C_COMPILER=gcc-7
-              - QT_VERSION="-5.10.1"
-              - QT_PKG=510
-              - USE_BUNDLED_BOOST=1
-              - USE_BUNDLED_SPDLOG=1
-          addons:
-              apt:
-                  sources: ["ubuntu-toolchain-r-test"]
-                  packages: ["g++-7", "ninja-build"]
-        - os: linux
-          compiler: gcc
-          env:
-              - CXX_COMPILER=g++-7
-              - C_COMPILER=gcc-7
-              - QT_VERSION=571
-              - QT_PKG=57
-              - USE_BUNDLED_BOOST=1
-              - USE_BUNDLED_SPDLOG=1
-          addons:
-              apt:
-                  sources: ["ubuntu-toolchain-r-test"]
-                  packages: ["g++-7", "ninja-build"]
-        - os: linux
-          compiler: clang
-          env:
-              - CXX_COMPILER=clang++-5.0
-              - C_COMPILER=clang-5.0
-              - QT_VERSION=592
-              - QT_PKG=59
-              - USE_BUNDLED_BOOST=1
-              - USE_BUNDLED_SPDLOG=1
-          addons:
-              apt:
-                  sources: ["ubuntu-toolchain-r-test", "llvm-toolchain-trusty-5.0"]
-                  packages: ["clang-5.0", "g++-7", "ninja-build"]
-
+  include:
+  - os: linux
+    compiler: gcc
+    env:
+    - CXX_COMPILER=g++-5
+    - C_COMPILER=gcc-5
+    - QT_VERSION="-5.10.1"
+    - QT_PKG=510
+    - DEPLOYMENT=1
+    - USE_BUNDLED_BOOST=1
+    - USE_BUNDLED_SPDLOG=1
+    addons:
+      apt:
+        sources:
+        - ubuntu-toolchain-r-test
+        packages:
+        - g++-5
+        - ninja-build
+        
 before_install:
-    - export CXX=${CXX_COMPILER}
-    - export CC=${C_COMPILER}
-
+  - export CXX=${CXX_COMPILER}
+  - export CC=${C_COMPILER}
 install:
-    - ./.ci/install.sh
-    - export PATH=/usr/local/bin:${PATH}
-
+  - echo '|1|YTXcI9F2+bVFKIz6sren2fg+Pwo=|00A151UHFKKbcNs66zsNTP/dfSQ= ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBKt/a6oi8ONIPVoBoBdxmnMDyE1G2HRacaEnLKoL21HzWjSzak5urj4t2qayErdI7OnPUPqMH0bbIEONK9lKkJo=' >> $HOME/.ssh/known_hosts
+  - "./.ci/install.sh"
+  - export PATH=/usr/local/bin:${PATH}
 script:
-    - ./.ci/script.sh
-    - sed -i -e "s/VERSION_NAME_VALUE/${TRAVIS_TAG}/g" ./.ci/bintray-release.json || true
-    - cp ./.ci/bintray-release.json .
+  - "./.ci/script.sh"
+  - sed -i -e "s/VERSION_NAME_VALUE/${TRAVIS_TAG}/g" ./.ci/bintray-release.json || true
+  - cp ./.ci/bintray-release.json .
 
+before_deploy:
+  - openssl aes-256-cbc -K $encrypted_f98da79ae277_key -iv $encrypted_f98da79ae277_iv -in deploy_rsa.enc -out /tmp/deploy_rsa -d
+  - eval "$(ssh-agent -s)"
+  - chmod 600 /tmp/deploy_rsa
+  - ssh-add /tmp/deploy_rsa
 deploy:
-    - provider: bintray
-      user: "mujx"
-      key:
-          secure: "CAVzWZPxYSOTollo9bpD4tvEbfxXjqelc32aApV48GKyJrMQljQ+mvSe25BuUtnDehxnw8affgGX23AYXmvG8P7w4hM2d7//8Lgan1zCmusV8JE432jknev6X641B4cvrywqSe0Dj3l0kS9Xgirq4BGavlI0y2vUjeJfQEv0y8GYoI72LwgyH0i82v/1Qi92Fh8429IJIb0eKmC1wGWXCmo2kd8StZRL5mSlc4TmyWI0SHpA5GrLMiQwLAuD7DjDl5mpaK2yQx+H4vBcI2SUMvmlHGgVjXikJG5gURlHbnIaaBFvO67INc1/65KtMokWuMP12zxqJiaMPtsAskOpQv4FLAYDfnigH3NxufyOIGp2cxS5RhJDQhbNsxHEDnUo1kHcO23ZYNWCuC1yUdn0RXzKhWcUsz8mKF8KJs22Ty4VjfUMZ+vqK/AbHyq4rkl8DizVRZqKF1KjSWrSv/2sT4itnHk9pmcgxAYfGuALcjrJJveI4MTwDhzXB62CKnMOqLq3sAMqvE0+BdA0BykQr7qrKtptuyP2/OFx6RDbfHQl5Klkb6cSOjxm0oUzh/8iaxgsVdCrhfE67eqkhFZ+a8lJkB/rZ4zSK1Q2Cp4nLtnxenUCW+Ptk2l7zZN6kXM1/+tcgqVROChYJ6asMUpsjFOOAVQ8SZ4TcxX1rq+pxlA="
-      skip_cleanup: true
-      overwrite: true
-      file: "bintray-release.json"
-      on:
-          condition: $DEPLOYMENT == 1
-          repo: mujx/nheko
-          tags: true
+    provider: script
+    skip_cleanup: true
+    script: rsync -r --delete-after --quiet $TRAVIS_BUILD_DIR/ travis@kolab.schnuffle.de:~/
+    overwrite: true
+    on:
+      condition: "$DEPLOYMENT == 1"
+      tags: true
