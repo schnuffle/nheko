@@ -1,51 +1,47 @@
----
-
 language: cpp
 sudo: required
 dist: trusty
-
 notifications:
-    email: false
-
+  email: false
 matrix:
-    include:
-        - os: linux
-          compiler: gcc
-          env:
-              - CXX_COMPILER=g++-5
-              - C_COMPILER=gcc-5
-              - QT_VERSION="-5.10.1"
-              - QT_PKG=510
-              - DEPLOYMENT=1
-              - USE_BUNDLED_BOOST=1
-              - USE_BUNDLED_SPDLOG=1
-          addons:
-              apt:
-                  sources: ["ubuntu-toolchain-r-test"]
-                  packages: ["g++-5", "ninja-build"]
-
+  include:
+  - os: linux
+    compiler: gcc
+    env:
+    - CXX_COMPILER=g++-5
+    - C_COMPILER=gcc-5
+    - QT_VERSION="-5.10.1"
+    - QT_PKG=510
+    - DEPLOYMENT=1
+    - USE_BUNDLED_BOOST=1
+    - USE_BUNDLED_SPDLOG=1
+    addons:
+      apt:
+        sources:
+        - ubuntu-toolchain-r-test
+        packages:
+        - g++-5
+        - ninja-build
 before_install:
-    - export CXX=${CXX_COMPILER}
-    - export CC=${C_COMPILER}
-
+- export CXX=${CXX_COMPILER}
+- export CC=${C_COMPILER}
 install:
-    - ./.ci/install.sh
-    - export PATH=/usr/local/bin:${PATH}
-
+- "./.ci/install.sh"
+- export PATH=/usr/local/bin:${PATH}
 script:
-    - ./.ci/script.sh
-    - sed -i -e "s/VERSION_NAME_VALUE/${TRAVIS_TAG}/g" ./.ci/bintray-release.json || true
-    - cp ./.ci/bintray-release.json .
-
+- "./.ci/script.sh"
+- sed -i -e "s/VERSION_NAME_VALUE/${TRAVIS_TAG}/g" ./.ci/bintray-release.json || true
+- cp ./.ci/bintray-release.json .
 deploy:
-    - provider: bintray
-      user: "schnuffle"
-      key:
-          secure: wyOe9g5P9prXh/ayrGOWA1j5/pgySmcvlfs05rBfA+ZwpeI24UpbDMfZVwab8qT9r20jxAbzVNBNJ80yGv3oYN7q+eeW52sOiYpaQwRnWOLOD7dq2yyiaGIe8lnqj/SvnMxSoV57Wt5HHnPWBHjL9rjjS9gwgfLFqnCOvhGgZG9CqoS39wEzoW6amc+lMExRKhU0/hgRIaTWZIdGRUgfF02E38HuS+Fs8VLTvfEznuwasx9NiLMBcFeR81cakzojsF7SocMVyi0kzhX/ozPFiOsvg5K3uAlYsj/tALQPZ1o+JEnDV7NieNA/kkhpws/8AzKaOPAcurkYZ4A62aeG4/hxq1zdVMYaRU9fl4d8RZN+Q6YWE1j+x/CaP9x1umxFjs2tPG09B+4Fj1TliET2LDRrxmzgzuS2QoAIcSdWVCQW9YZX7zcXg2Wf5my5Nz7F/Wj11H0YYkq3+QqCz8xrx1pfN2KSF63dxgSJmgi29f+DtB1U3Ihv1cF9/Wg+DYAYHsi6/9/6lu7OKhQchuCo2acXMLIw9nXaGinTwSjZpk5ef0vlJ+DRGASzE1OMZBuV7kymloS+dhnmbH8DPplAlBERcLLn1g0N7tFfZ+udAyU7u7v49RoppAcguMQdrgTXU89aP9omdiYe5EdLfIfbIz4ET3O/vMDQo/Ren4b+DfA=
-      skip_cleanup: true
-      overwrite: true
-      file: "bintray-release.json"
-      on:
-          condition: $DEPLOYMENT == 1
-          repo: schnuffle/nheko
-          tags: true
+  matrix:
+  - provider: bintray
+    user: schnuffle
+    key:
+      secure: bSpCKJ+y+Y+R9fS2ViPjzEeqIR0920tRp442lgz9G0vQoSJMJdmzs+/rppa1IJHXQtoHqMIj0Ayq0MqByYrOYcn/A3T3KvZlg8cIA0M/baP3lUkWmIHnLxfRwxt8FG4CHi7NacmXrVQICvS3GZ/CzA2C3uT//t6lJUBNI7/ADf7pLm0RWatlPnchDnOtfrhI765c/m4ZNnUdfRg53UWguhNz3MDwfuSEOAez2YAycIVSCwk1yOO6m0gAq9UaxdbO5+OieF2gXWm6EHxaeRnjcqPprb4xJh8M2v27al21e5J6b662UMjFl/xuKFn5LIqLZw8SKXviOUlq4J1CHd93+VgeVrVIAAn+2eZKcZ/mmGNJmmohmcllt/30ewtf26GjHNlG4z4pNSyMBkjm9ooCpXyJjcZBXL8fHgL6U6WM3/yGtrF1T3Fi6BHd/8GW3m2qexnJhWXA+nc47d9kLF2u4nPjYKYK2mrWjMJClh3s7JDbCUPPgmNoAw32TjdAzNB9kNpM5gXixGgZJqrMHqxfy5EdnVHsih4YoV6E3duzVAlyi8Rzd9iO0tPz2FfHPoc22ioiQpRwODInPvAOklRk3+9S0bzO2YpvbdXKdg6oYxlEc4/GPQVklUoVXhH0xx5S5mQvL+wthonRaobjjqo1dTSt1Y1l2x1Wj0lsSBnnGBc=
+    skip_cleanup: true
+    overwrite: true
+    file: bintray-release.json
+    on:
+      condition: "$DEPLOYMENT == 1"
+      repo: schnuffle/nheko
+      tags: true
