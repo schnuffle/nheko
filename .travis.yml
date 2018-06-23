@@ -47,5 +47,5 @@ deploy:
       file: "bintray-release.json"
       on:
           condition: $DEPLOYMENT == 1
-          repo: schnuffleit/nheko
+          repo: schnuffle/nheko
           tags: true
