@@ -9,18 +9,11 @@ notifications:
 
 matrix:
     include:
-        - os: osx
-          osx_image: xcode9
-          compiler: clang
-          env:
-              - DEPLOYMENT=1
-              - USE_BUNDLED_BOOST=0
-              - USE_BUNDLED_SPDLOG=0
         - os: linux
           compiler: gcc
           env:
-              - CXX_COMPILER=g++-7
-              - C_COMPILER=gcc-7
+              - CXX_COMPILER=g++-5
+              - C_COMPILER=gcc-5
               - QT_VERSION="-5.10.1"
               - QT_PKG=510
               - DEPLOYMENT=1
@@ -29,33 +22,7 @@ matrix:
           addons:
               apt:
                   sources: ["ubuntu-toolchain-r-test"]
-                  packages: ["g++-7", "ninja-build"]
-        - os: linux
-          compiler: gcc
-          env:
-              - CXX_COMPILER=g++-7
-              - C_COMPILER=gcc-7
-              - QT_VERSION=571
-              - QT_PKG=57
-              - USE_BUNDLED_BOOST=1
-              - USE_BUNDLED_SPDLOG=1
-          addons:
-              apt:
-                  sources: ["ubuntu-toolchain-r-test"]
-                  packages: ["g++-7", "ninja-build"]
-        - os: linux
-          compiler: clang
-          env:
-              - CXX_COMPILER=clang++-5.0
-              - C_COMPILER=clang-5.0
-              - QT_VERSION=592
-              - QT_PKG=59
-              - USE_BUNDLED_BOOST=1
-              - USE_BUNDLED_SPDLOG=1
-          addons:
-              apt:
-                  sources: ["ubuntu-toolchain-r-test", "llvm-toolchain-trusty-5.0"]
-                  packages: ["clang-5.0", "g++-7", "ninja-build"]
+                  packages: ["g++-5", "ninja-build"]
 
 before_install:
     - export CXX=${CXX_COMPILER}
