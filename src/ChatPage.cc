@@ -65,7 +65,7 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QWidget *parent)
         communitiesList_ = new CommunitiesList(this);
         topLayout_->addWidget(communitiesList_);
 
-        auto splitter = new Splitter(this);
+        splitter = new Splitter(this);
         splitter->setHandleWidth(0);
 
         topLayout_->addWidget(splitter);
@@ -118,7 +118,7 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QWidget *parent)
         // Splitter
         splitter->addWidget(sideBar_);
         splitter->addWidget(content_);
-        splitter->setSizes({ui::sidebar::NormalSize, parent->width() - ui::sidebar::NormalSize});
+        splitter->restoreSizes(parent->width());
 
         text_input_    = new TextInputWidget(this);
         typingDisplay_ = new TypingDisplay(this);
@@ -183,6 +183,7 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QWidget *parent)
                 emit showOverlayProgressBar();
         });
 
+        connect(top_bar_, &TopRoomBar::showRoomList, splitter, &Splitter::showFullRoomList);
         connect(top_bar_, &TopRoomBar::inviteUsers, this, [this](QStringList users) {
                 const auto room_id = current_room_.toStdString();
 
@@ -223,6 +224,7 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QWidget *parent)
         });
         connect(room_list_, &RoomList::roomChanged, text_input_, &TextInputWidget::stopTyping);
         connect(room_list_, &RoomList::roomChanged, this, &ChatPage::changeTopRoomInfo);
+        connect(room_list_, &RoomList::roomChanged, splitter, &Splitter::showChatView);
         connect(room_list_, &RoomList::roomChanged, text_input_, &TextInputWidget::focusLineEdit);
         connect(
           room_list_, &RoomList::roomChanged, view_manager_, &TimelineViewManager::setHistoryView);
@@ -516,23 +518,6 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QWidget *parent)
         connect(this, &ChatPage::leftRoom, this, &ChatPage::removeRoom);
         connect(this, &ChatPage::notificationsRetrieved, this, &ChatPage::sendDesktopNotifications);
 
-        showContentTimer_ = new QTimer(this);
-        showContentTimer_->setSingleShot(true);
-        connect(showContentTimer_, &QTimer::timeout, this, [this]() {
-                consensusTimer_->stop();
-                emit contentLoaded();
-        });
-
-        consensusTimer_ = new QTimer(this);
-        connect(consensusTimer_, &QTimer::timeout, this, [this]() {
-                if (view_manager_->hasLoaded()) {
-                        // Remove the spinner overlay.
-                        emit contentLoaded();
-                        showContentTimer_->stop();
-                        consensusTimer_->stop();
-                }
-        });
-
         connect(communitiesList_,
                 &CommunitiesList::communityChanged,
                 this,
@@ -552,20 +537,15 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QWidget *parent)
                 this,
                 &ChatPage::setGroupViewState);
 
-        connect(this, &ChatPage::startConsesusTimer, this, [this]() {
-                consensusTimer_->start(CONSENSUS_TIMEOUT);
-                showContentTimer_->start(SHOW_CONTENT_TIMEOUT);
-        });
         connect(this, &ChatPage::initializeRoomList, room_list_, &RoomList::initialize);
         connect(this,
                 &ChatPage::initializeViews,
                 view_manager_,
                 [this](const mtx::responses::Rooms &rooms) { view_manager_->initialize(rooms); });
-        connect(
-          this,
-          &ChatPage::initializeEmptyViews,
-          this,
-          [this](const std::vector<std::string> &rooms) { view_manager_->initialize(rooms); });
+        connect(this,
+                &ChatPage::initializeEmptyViews,
+                view_manager_,
+                &TimelineViewManager::initWithMessages);
         connect(this, &ChatPage::syncUI, this, [this](const mtx::responses::Rooms &rooms) {
                 try {
                         room_list_->cleanupInvites(cache::client()->invites());
@@ -627,6 +607,7 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QWidget *parent)
         });
 
         connect(this, &ChatPage::dropToLoginPageCb, this, &ChatPage::dropToLoginPage);
+        connect(this, &ChatPage::messageReply, text_input_, &TextInputWidget::addReply);
 
         instance_ = this;
 }
@@ -817,6 +798,8 @@ ChatPage::showUnreadMessageNotification(int count)
 void
 ChatPage::loadStateFromCache()
 {
+        emit contentLoaded();
+
         nhlog::db()->info("restoring state from cache");
 
         getProfileInfo();
@@ -829,8 +812,9 @@ ChatPage::loadStateFromCache()
 
                         cache::client()->populateMembers();
 
-                        emit initializeEmptyViews(cache::client()->joinedRooms());
+                        emit initializeEmptyViews(cache::client()->roomMessages());
                         emit initializeRoomList(cache::client()->roomInfo());
+
                 } catch (const mtx::crypto::olm_exception &e) {
                         nhlog::crypto()->critical("failed to restore olm account: {}", e.what());
                         emit dropToLoginPageCb(
@@ -841,6 +825,9 @@ ChatPage::loadStateFromCache()
                         emit dropToLoginPageCb(
                           tr("Failed to restore save data. Please login again."));
                         return;
+                } catch (const json::exception &e) {
+                        nhlog::db()->critical("failed to parse cache data: {}", e.what());
+                        return;
                 }
 
                 nhlog::crypto()->info("ed25519   : {}", olm::client()->identity_keys().ed25519);
@@ -848,9 +835,6 @@ ChatPage::loadStateFromCache()
 
                 // Start receiving events.
                 emit trySyncCb();
-
-                // Check periodically if the timelines have been loaded.
-                emit startConsesusTimer();
         });
 }
 
@@ -1328,4 +1312,36 @@ ChatPage::getProfileInfo()
                     });
           });
         // TODO http::client()->getOwnCommunities();
+}
+
+void
+ChatPage::hideSideBars()
+{
+        communitiesList_->hide();
+        sideBar_->hide();
+        top_bar_->enableBackButton();
+}
+
+void
+ChatPage::showSideBars()
+{
+        if (userSettings_->isGroupViewEnabled())
+                communitiesList_->show();
+
+        sideBar_->show();
+        top_bar_->disableBackButton();
+}
+
+int
+ChatPage::timelineWidth()
+{
+        int sidebarWidth = sideBar_->size().width();
+        sidebarWidth += communitiesList_->size().width();
+
+        return size().width() - sidebarWidth;
+}
+bool
+ChatPage::isSideBarExpanded()
+{
+        return sideBar_->size().width() > ui::sidebar::NormalSize;
 }

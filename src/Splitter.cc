@@ -15,10 +15,17 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <QApplication>
 #include <QDebug>
+#include <QDesktopWidget>
+#include <QSettings>
+#include <QShortcut>
 
+#include "Config.h"
 #include "Splitter.h"
 #include "Theme.h"
+
+constexpr auto MaxWidth = (1 << 24) - 1;
 
 Splitter::Splitter(QWidget *parent)
   : QSplitter(parent)
@@ -26,6 +33,42 @@ Splitter::Splitter(QWidget *parent)
         connect(this, &QSplitter::splitterMoved, this, &Splitter::onSplitterMoved);
         setChildrenCollapsible(false);
         setStyleSheet("QSplitter::handle { image: none; }");
+}
+
+void
+Splitter::restoreSizes(int fallback)
+{
+        QSettings settings;
+        int savedWidth = settings.value("sidebar/width").toInt();
+
+        auto left = widget(0);
+        if (savedWidth == 0) {
+                hideSidebar();
+                return;
+        } else if (savedWidth == ui::sidebar::SmallSize) {
+                if (left) {
+                        left->setMinimumWidth(ui::sidebar::SmallSize);
+                        left->setMaximumWidth(ui::sidebar::SmallSize);
+                        return;
+                }
+        }
+
+        left->setMinimumWidth(ui::sidebar::NormalSize);
+        left->setMaximumWidth(2 * ui::sidebar::NormalSize);
+        setSizes({ui::sidebar::NormalSize, fallback - ui::sidebar::NormalSize});
+
+        setStretchFactor(0, 0);
+        setStretchFactor(1, 1);
+}
+
+Splitter::~Splitter()
+{
+        auto left = widget(0);
+
+        if (left) {
+                QSettings settings;
+                settings.setValue("sidebar/width", left->width());
+        }
 }
 
 void
@@ -71,7 +114,9 @@ Splitter::onSplitterMoved(int pos, int index)
 
                         // if we are coming from the left, the cursor should
                         // end up on the second widget.
-                        if (extended.contains(pos)) {
+                        if (extended.contains(pos) &&
+                            right->size().width() >=
+                              conf::sideBarCollapsePoint + ui::sidebar::NormalSize) {
                                 left->setMinimumWidth(ui::sidebar::NormalSize);
                                 left->setMaximumWidth(2 * ui::sidebar::NormalSize);
 
@@ -79,4 +124,45 @@ Splitter::onSplitterMoved(int pos, int index)
                         }
                 }
         }
+}
+
+void
+Splitter::hideSidebar()
+{
+        auto left = widget(0);
+        if (left)
+                left->hide();
+}
+
+void
+Splitter::showChatView()
+{
+        auto left  = widget(0);
+        auto right = widget(1);
+
+        if (right->isHidden()) {
+                left->hide();
+                right->show();
+
+                // Restore previous size.
+                if (left->minimumWidth() == ui::sidebar::SmallSize) {
+                        left->setMinimumWidth(ui::sidebar::SmallSize);
+                        left->setMaximumWidth(ui::sidebar::SmallSize);
+                } else {
+                        left->setMinimumWidth(ui::sidebar::NormalSize);
+                        left->setMaximumWidth(2 * ui::sidebar::NormalSize);
+                }
+        }
+}
+
+void
+Splitter::showFullRoomList()
+{
+        auto left  = widget(0);
+        auto right = widget(1);
+
+        right->hide();
+
+        left->show();
+        left->setMaximumWidth(MaxWidth);
 }

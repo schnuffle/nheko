@@ -2,7 +2,7 @@ nheko
 ----
 [![Build Status](https://travis-ci.org/mujx/nheko.svg?branch=master)](https://travis-ci.org/mujx/nheko)
 [![Build status](https://ci.appveyor.com/api/projects/status/07qrqbfylsg4hw2h/branch/master?svg=true)](https://ci.appveyor.com/project/mujx/nheko/branch/master)
-[![Latest Stable Version](https://img.shields.io/badge/download-stable-green.svg)](https://bintray.com/mujx/matrix/nheko/_latestVersion)
+[![Latest Stable Version](https://img.shields.io/badge/download-stable-green.svg)](https://bintray.com/mujx/matrix/nheko/v0.4.3)
 [![Nightly](https://img.shields.io/badge/download-nightly-green.svg)](https://bintray.com/mujx/matrix/nheko/nightly)
 [![Chat on Matrix](https://img.shields.io/badge/chat-on%20matrix-blue.svg)](https://matrix.to/#/#nheko:matrix.org)
 [![AUR: nheko](https://img.shields.io/badge/AUR-nheko-blue.svg)](https://aur.archlinux.org/packages/nheko)
@@ -15,7 +15,7 @@ feels more like a mainstream chat app ([Riot], Telegram etc) and less like an IR
 Most of the features you would expect from a chat application are missing right now
 but we are getting close to a more feature complete client.
 Specifically there is support for:
-- E2E encryption.
+- E2E encryption (text messages only: attachments are currently sent unencrypted).
 - User registration.
 - Creating, joining & leaving rooms.
 - Sending & receiving invites.
@@ -133,14 +133,37 @@ brew install qt5 lmdb cmake llvm libsodium spdlog boost
 Make sure to install the `MSVC 2017 64-bit` toolset for at least Qt 5.9
 (lower versions does not support VS2017).
 
-3. Install lmdb and openssl with `vcpkg`. You can simply clone it into a subfolder
+3. Install dependencies with `vcpkg`. You can simply clone it into a subfolder
 of the root nheko source directory.
 
 ```powershell
 git clone http:\\github.com\Microsoft\vcpkg
 cd vcpkg
 .\bootstrap-vcpkg.bat
-.\vcpkg install --triplet x64-windows lmdb openssl
+.\vcpkg install --triplet x64-windows \
+	boost-asio \
+	boost-beast \
+	boost-iostreams \
+	boost-random \
+	boost-signals2 \
+	boost-system \
+	boost-thread \
+	libsodium \
+	lmdb \
+	openssl \
+	zlib
+```
+
+4. Install dependencies not managed by vcpkg. (libolm, libmtxclient, libmatrix_structs)
+
+Inside the project root run the following (replacing the path to vcpkg as necessary).
+
+```bash
+cmake -G "Visual Studio 15 2017 Win64" -Hdeps -B.deps
+        -DCMAKE_TOOLCHAIN_FILE=C:/Users/<your-path>/vcpkg/scripts/buildsystems/vcpkg.cmake
+        -DUSE_BUNDLED_BOOST=OFF
+cmake --build .deps --config Release
+cmake --build .deps --config Debug
 ```
 
 ### Building

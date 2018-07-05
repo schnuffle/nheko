@@ -8,6 +8,7 @@
 // Font sizes are in pixels.
 
 namespace conf {
+constexpr int sideBarCollapsePoint = 450;
 // Global settings.
 constexpr int fontSize                   = 14;
 constexpr int textInputFontSize          = 14;
@@ -97,6 +98,7 @@ constexpr int headerLeftMargin   = 15;
 
 namespace fonts {
 constexpr int timestamp     = 13;
+constexpr int indicator     = timestamp - 2;
 constexpr int dateSeparator = conf::fontSize;
 } // namespace fonts
 } // namespace timeline

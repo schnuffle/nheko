@@ -164,6 +164,34 @@ MainWindow::MainWindow(QWidget *parent)
 }
 
 void
+MainWindow::showEvent(QShowEvent *event)
+{
+        adjustSideBars();
+        QMainWindow::showEvent(event);
+}
+
+void
+MainWindow::resizeEvent(QResizeEvent *event)
+{
+        adjustSideBars();
+        QMainWindow::resizeEvent(event);
+}
+
+void
+MainWindow::adjustSideBars()
+{
+        const int timelineWidth = chat_page_->timelineWidth();
+        const int minAvailableWidth =
+          conf::sideBarCollapsePoint + ui::sidebar::CommunitiesSidebarSize;
+
+        if (timelineWidth < minAvailableWidth && !chat_page_->isSideBarExpanded()) {
+                chat_page_->hideSideBars();
+        } else {
+                chat_page_->showSideBars();
+        }
+}
+
+void
 MainWindow::restoreWindowSize()
 {
         QSettings settings;
@@ -234,7 +262,11 @@ MainWindow::showChatPage()
 
         showOverlayProgressBar();
 
-        QTimer::singleShot(100, this, [this]() { pageStack_->setCurrentWidget(chat_page_); });
+        pageStack_->setCurrentWidget(chat_page_);
+
+        pageStack_->removeWidget(welcome_page_);
+        pageStack_->removeWidget(login_page_);
+        pageStack_->removeWidget(register_page_);
 
         login_page_->reset();
         chat_page_->bootstrap(userid, homeserver, token);
