@@ -24,6 +24,17 @@ class Splitter : public QSplitter
         Q_OBJECT
 public:
         explicit Splitter(QWidget *parent = nullptr);
+        ~Splitter();
+
+        void restoreSizes(int fallback);
+
+public slots:
+        void hideSidebar();
+        void showFullRoomList();
+        void showChatView();
+
+signals:
+        void hiddenSidebar();
 
 private:
         void onSplitterMoved(int pos, int index);

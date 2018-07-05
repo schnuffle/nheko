@@ -38,6 +38,26 @@ if(NOT MSVC AND NOT APPLE)
   find_package(Threads REQUIRED)
 endif()
 
+if (BUILD_DOCS)
+    find_package(Doxygen)
+
+    if (DOXYGEN_FOUND)
+        set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Doxyfile.in)
+        set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
+
+        configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT})
+
+        add_custom_target(docs ALL
+            COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            COMMENT "Generating API documentation with Doxygen"
+            VERBATIM )
+    else (DOXYGEN_FOUND)
+        message("Doxygen need to be installed to generate the doxygen documentation")
+    endif (DOXYGEN_FOUND)
+endif()
+
+
 #
 # LMDB
 #
@@ -206,23 +226,25 @@ find_package(MatrixClient 0.1.0 REQUIRED)
 find_package(Olm 2 REQUIRED)
 find_package(spdlog 0.16.0 CONFIG REQUIRED)
 
-#
-# tweeny
-#
-if(NOT TWEENY_INCLUDE_DIR)
-    include(Tweeny)
-    set(EXTERNAL_PROJECT_DEPS ${EXTERNAL_PROJECT_DEPS} Tweeny)
-endif()
-include_directories(SYSTEM ${TWEENY_INCLUDE_DIR})
-
-#
-# lmdbxx
-#
 if(NOT LMDBXX_INCLUDE_DIR)
-    include(LMDBXX)
-    set(EXTERNAL_PROJECT_DEPS ${EXTERNAL_PROJECT_DEPS} lmdbxx)
+    find_path(LMDBXX_INCLUDE_DIR
+            NAMES lmdb++.h
+            PATHS /usr/include
+                  /usr/local/include
+                  $ENV{LIB_DIR}/include
+                  $ENV{LIB_DIR}/include/lmdbxx)
 endif()
-include_directories(SYSTEM ${LMDBXX_INCLUDE_DIR})
+include_directories(${LMDBXX_INCLUDE_DIR})
+
+if(NOT TWEENY_INCLUDE_DIR)
+    find_path(TWEENY_INCLUDE_DIR
+            NAMES tweeny/tweeny.h
+            PATHS /usr/include/
+                  /usr/local/include/
+                  $ENV{LIB_DIR}/include/
+                  $ENV{LIB_DIR}/include/tweeny)
+endif()
+include_directories(${TWEENY_INCLUDE_DIR})
 
 include_directories(include)
 include_directories(include/ui)
@@ -323,7 +345,17 @@ if (APPLE)
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -framework Foundation")
     set(SRC_FILES ${SRC_FILES} src/notifications/ManagerMac.mm)
 elseif (WIN32)
-    set(SRC_FILES ${SRC_FILES} src/notifications/ManagerWin.cpp)
+    file(DOWNLOAD
+         "https://raw.githubusercontent.com/mohabouje/WinToast/41ed1c58d5dce0ee9c01dbdeac05be45358d4f57/src/wintoastlib.cpp"
+         ${PROJECT_SOURCE_DIR}/src/wintoastlib.cpp
+         EXPECTED_HASH SHA256=1A1A7CE41C1052B12946798F4A6C67CE1FAD209C967F5ED4D720B173527E2073)
+
+    file(DOWNLOAD
+         "https://raw.githubusercontent.com/mohabouje/WinToast/41ed1c58d5dce0ee9c01dbdeac05be45358d4f57/src/wintoastlib.h"
+         ${PROJECT_SOURCE_DIR}/include/wintoastlib.h
+         EXPECTED_HASH SHA256=b4481023c5782733795838be22bf1a75f45d87458cd4d9a5a75f664a146eea11)
+
+    set(SRC_FILES ${SRC_FILES} src/notifications/ManagerWin.cpp src/wintoastlib.cpp)
 else ()
     set(SRC_FILES ${SRC_FILES} src/notifications/ManagerLinux.cpp)
 endif ()

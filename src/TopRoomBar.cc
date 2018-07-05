@@ -73,7 +73,20 @@ TopRoomBar::TopRoomBar(QWidget *parent)
         settingsBtn_->setIcon(settings_icon);
         settingsBtn_->setIconSize(QSize(buttonSize_ / 2, buttonSize_ / 2));
 
+        backBtn_ = new FlatButton(this);
+        backBtn_->setFixedSize(buttonSize_, buttonSize_);
+        backBtn_->setCornerRadius(buttonSize_ / 2);
+
+        QIcon backIcon;
+        backIcon.addFile(":/icons/icons/ui/angle-pointing-to-left.png");
+        backBtn_->setIcon(backIcon);
+        backBtn_->setIconSize(QSize(buttonSize_ / 2, buttonSize_ / 2));
+        backBtn_->hide();
+
+        connect(backBtn_, &QPushButton::clicked, this, &TopRoomBar::showRoomList);
+
         topLayout_->addWidget(avatar_);
+        topLayout_->addWidget(backBtn_);
         topLayout_->addLayout(textLayout_, 1);
         topLayout_->addWidget(settingsBtn_, 0, Qt::AlignRight);
 
@@ -110,6 +123,20 @@ TopRoomBar::TopRoomBar(QWidget *parent)
                 menu_->popup(
                   QPoint(pos.x() + buttonSize_ - menu_->sizeHint().width(), pos.y() + buttonSize_));
         });
+}
+
+void
+TopRoomBar::enableBackButton()
+{
+        avatar_->hide();
+        backBtn_->show();
+}
+
+void
+TopRoomBar::disableBackButton()
+{
+        avatar_->show();
+        backBtn_->hide();
 }
 
 void

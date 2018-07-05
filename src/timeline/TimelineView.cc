@@ -143,7 +143,7 @@ TimelineView::fetchHistory()
 
                 isPaginationInProgress_ = true;
                 getMessages();
-                paginationTimer_->start(5000);
+                paginationTimer_->start(2000);
 
                 return;
         }
@@ -185,7 +185,6 @@ TimelineView::sliderMoved(int position)
 
                 // Prevent user from moving up when there is pagination in
                 // progress.
-                // TODO: Keep a map of the event ids to filter out duplicates.
                 if (isPaginationInProgress_)
                         return;
 
@@ -379,7 +378,7 @@ TimelineView::renderBottomEvents(const std::vector<TimelineEvent> &events)
 
                         // Prevent blocking of the event-loop
                         // by calling processEvents every 10 items we render.
-                        if (counter % 10 == 0)
+                        if (counter % 4 == 0)
                                 QApplication::processEvents();
                 }
         }
@@ -490,7 +489,7 @@ TimelineView::init()
         scroll_widget_ = new QWidget(this);
 
         scroll_layout_ = new QVBoxLayout(scroll_widget_);
-        scroll_layout_->setContentsMargins(15, 0, 15, 15);
+        scroll_layout_->setContentsMargins(4, 0, 15, 15);
         scroll_layout_->addStretch(1);
         scroll_layout_->setSpacing(0);
         scroll_layout_->setObjectName("timelinescrollarea");
@@ -626,7 +625,7 @@ TimelineView::updatePendingMessage(const std::string &txn_id, const QString &eve
                         // If the response comes after we have received the event from sync
                         // we've already marked the widget as received.
                         if (!msg.widget->isReceived()) {
-                                msg.widget->markReceived();
+                                msg.widget->markReceived(msg.is_encrypted);
                                 pending_sent_msgs_.append(msg);
                         }
                 } else {
@@ -690,6 +689,9 @@ TimelineView::sendNextPendingMessage()
         PendingMessage &m = pending_msgs_.head();
 
         nhlog::ui()->info("[{}] sending next queued message", m.txn_id);
+
+        if (m.widget)
+                m.widget->markSent();
 
         if (m.is_encrypted) {
                 nhlog::ui()->info("[{}] sending encrypted event", m.txn_id);
@@ -836,7 +838,7 @@ TimelineView::removePendingMessage(const std::string &txn_id)
         for (auto it = pending_msgs_.begin(); it != pending_msgs_.end(); ++it) {
                 if (it->txn_id == txn_id) {
                         if (it->widget)
-                                it->widget->markReceived();
+                                it->widget->markReceived(it->is_encrypted);
 
                         nhlog::ui()->info("[{}] received sync before message response", txn_id);
                         return;
@@ -1036,7 +1038,8 @@ TimelineEvent
 TimelineView::findLastViewableEvent(const std::vector<TimelineEvent> &events)
 {
         auto it = std::find_if(events.rbegin(), events.rend(), [](const auto &event) {
-                return mtx::events::EventType::RoomMessage == utils::event_type(event);
+                return (mtx::events::EventType::RoomMessage == utils::event_type(event)) ||
+                       (mtx::events::EventType::RoomEncrypted == utils::event_type(event));
         });
 
         return (it == std::rend(events)) ? events.back() : *it;
@@ -1278,11 +1281,17 @@ TimelineView::prepareEncryptedMessage(const PendingMessage &msg)
                           }
 
                           for (const auto &user : res.device_keys) {
+                                  // Mapping from a device_id with valid identity keys to the
+                                  // generated room_key event used for sharing the megolm session.
+                                  std::map<std::string, std::string> room_key_msgs;
+                                  std::map<std::string, DevicePublicKeys> deviceKeys;
+
+                                  room_key_msgs.clear();
+                                  deviceKeys.clear();
+
                                   for (const auto &dev : user.second) {
                                           const auto user_id   = UserId(dev.second.user_id);
                                           const auto device_id = DeviceId(dev.second.device_id);
-
-                                          nhlog::net()->info("device_id {}", device_id.get());
 
                                           const auto device_keys = dev.second.keys;
                                           const auto curveKey    = "curve25519:" + device_id.get();
@@ -1300,12 +1309,6 @@ TimelineView::prepareEncryptedMessage(const PendingMessage &msg)
                                           pks.ed25519    = device_keys.at(edKey);
                                           pks.curve25519 = device_keys.at(curveKey);
 
-                                          // Validate signatures
-                                          for (const auto &algo : dev.second.keys) {
-                                                  nhlog::net()->info(
-                                                    "dev keys {} {}", algo.first, algo.second);
-                                          }
-
                                           try {
                                                   if (!mtx::crypto::verify_identity_signature(
                                                         json(dev.second), device_id, user_id)) {
@@ -1319,6 +1322,11 @@ TimelineView::prepareEncryptedMessage(const PendingMessage &msg)
                                                     "failed to parse device key json: {}",
                                                     e.what());
                                                   continue;
+                                          } catch (const mtx::crypto::olm_exception &e) {
+                                                  nhlog::crypto()->warn(
+                                                    "failed to verify device key json: {}",
+                                                    e.what());
+                                                  continue;
                                           }
 
                                           auto room_key = olm::client()
@@ -1326,19 +1334,41 @@ TimelineView::prepareEncryptedMessage(const PendingMessage &msg)
                                                               user_id, pks.ed25519, megolm_payload)
                                                             .dump();
 
-                                          http::v2::client()->claim_keys(
-                                            user_id,
-                                            {device_id},
-                                            std::bind(&TimelineView::handleClaimedKeys,
-                                                      this,
-                                                      keeper,
-                                                      room_key,
-                                                      pks,
-                                                      user_id,
-                                                      device_id,
-                                                      std::placeholders::_1,
-                                                      std::placeholders::_2));
+                                          room_key_msgs.emplace(device_id, room_key);
+                                          deviceKeys.emplace(device_id, pks);
                                   }
+
+                                  std::vector<std::string> valid_devices;
+                                  valid_devices.reserve(room_key_msgs.size());
+                                  for (auto const &d : room_key_msgs) {
+                                          valid_devices.push_back(d.first);
+
+                                          nhlog::net()->info("{}", d.first);
+                                          nhlog::net()->info("  curve25519 {}",
+                                                             deviceKeys.at(d.first).curve25519);
+                                          nhlog::net()->info("  ed25519 {}",
+                                                             deviceKeys.at(d.first).ed25519);
+                                  }
+
+                                  nhlog::net()->info(
+                                    "sending claim request for user {} with {} devices",
+                                    user.first,
+                                    valid_devices.size());
+
+                                  http::v2::client()->claim_keys(
+                                    user.first,
+                                    valid_devices,
+                                    std::bind(&TimelineView::handleClaimedKeys,
+                                              this,
+                                              keeper,
+                                              room_key_msgs,
+                                              deviceKeys,
+                                              user.first,
+                                              std::placeholders::_1,
+                                              std::placeholders::_2));
+
+                                  // TODO: Wait before sending the next batch of requests.
+                                  std::this_thread::sleep_for(std::chrono::milliseconds(500));
                           }
                   });
 
@@ -1354,44 +1384,62 @@ TimelineView::prepareEncryptedMessage(const PendingMessage &msg)
 
 void
 TimelineView::handleClaimedKeys(std::shared_ptr<StateKeeper> keeper,
-                                const std::string &room_key,
-                                const DevicePublicKeys &pks,
+                                const std::map<std::string, std::string> &room_keys,
+                                const std::map<std::string, DevicePublicKeys> &pks,
                                 const std::string &user_id,
-                                const std::string &device_id,
                                 const mtx::responses::ClaimKeys &res,
                                 mtx::http::RequestErr err)
 {
         if (err) {
-                nhlog::net()->warn("claim keys error: {}", err->matrix_error.error);
+                nhlog::net()->warn("claim keys error: {} {} {}",
+                                   err->matrix_error.error,
+                                   err->parse_error,
+                                   static_cast<int>(err->status_code));
                 return;
         }
 
-        nhlog::net()->info("claimed keys for {} - {}", user_id, device_id);
+        nhlog::net()->info("claimed keys for {}", user_id);
 
         if (res.one_time_keys.size() == 0) {
-                nhlog::net()->info("no one-time keys found for device_id: {}", device_id);
+                nhlog::net()->info("no one-time keys found for user_id: {}", user_id);
                 return;
         }
 
         if (res.one_time_keys.find(user_id) == res.one_time_keys.end()) {
-                nhlog::net()->info(
-                  "no one-time keys found in device_id {} for the user {}", device_id, user_id);
+                nhlog::net()->info("no one-time keys found for user_id: {}", user_id);
                 return;
         }
 
         auto retrieved_devices = res.one_time_keys.at(user_id);
 
+        // Payload with all the to_device message to be sent.
+        json body;
+        body["messages"][user_id] = json::object();
+
         for (const auto &rd : retrieved_devices) {
-                nhlog::net()->info("{} : \n {}", rd.first, rd.second.dump(2));
+                const auto device_id = rd.first;
+                nhlog::net()->info("{} : \n {}", device_id, rd.second.dump(2));
 
                 // TODO: Verify signatures
-                auto otk    = rd.second.begin()->at("key");
-                auto id_key = pks.curve25519;
+                auto otk = rd.second.begin()->at("key");
 
-                auto s = olm::client()->create_outbound_session(id_key, otk);
+                if (pks.find(device_id) == pks.end()) {
+                        nhlog::net()->critical("couldn't find public key for device: {}",
+                                               device_id);
+                        continue;
+                }
 
-                auto device_msg =
-                  olm::client()->create_olm_encrypted_content(s.get(), room_key, pks.curve25519);
+                auto id_key = pks.at(device_id).curve25519;
+                auto s      = olm::client()->create_outbound_session(id_key, otk);
+
+                if (room_keys.find(device_id) == room_keys.end()) {
+                        nhlog::net()->critical("couldn't find m.room_key for device: {}",
+                                               device_id);
+                        continue;
+                }
+
+                auto device_msg = olm::client()->create_olm_encrypted_content(
+                  s.get(), room_keys.at(device_id), pks.at(device_id).curve25519);
 
                 try {
                         cache::client()->saveOlmSession(id_key, std::move(s));
@@ -1402,16 +1450,18 @@ TimelineView::handleClaimedKeys(std::shared_ptr<StateKeeper> keeper,
                                                   e.what());
                 }
 
-                json body{{"messages", {{user_id, {{device_id, device_msg}}}}}};
-
-                http::v2::client()->send_to_device(
-                  "m.room.encrypted", body, [keeper](mtx::http::RequestErr err) {
-                          if (err) {
-                                  nhlog::net()->warn("failed to send "
-                                                     "send_to_device "
-                                                     "message: {}",
-                                                     err->matrix_error.error);
-                          }
-                  });
+                body["messages"][user_id][device_id] = device_msg;
         }
+
+        nhlog::net()->info("send_to_device: {}", user_id);
+
+        http::v2::client()->send_to_device(
+          "m.room.encrypted", body, [keeper](mtx::http::RequestErr err) {
+                  if (err) {
+                          nhlog::net()->warn("failed to send "
+                                             "send_to_device "
+                                             "message: {}",
+                                             err->matrix_error.error);
+                  }
+          });
 }
