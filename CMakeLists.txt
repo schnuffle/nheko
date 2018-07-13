@@ -67,6 +67,7 @@ include(LMDB)
 # Discover Qt dependencies.
 #
 find_package(Qt5 COMPONENTS Core Widgets LinguistTools Concurrent Svg Multimedia REQUIRED)
+find_package(Qt5DBus)
 
 if (APPLE)
     find_package(Qt5MacExtras REQUIRED)
@@ -102,6 +103,11 @@ if(NOT MSVC)
         -fdiagnostics-color=always \
         -Wunreachable-code"
     )
+    if (NOT CMAKE_COMPILER_IS_GNUCXX)
+        # -Wshadow is buggy and broken in GCC, so do not enable it.
+        # see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=79328
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wshadow")
+    endif()
 endif()
 
 if(NOT (CMAKE_BUILD_TYPE OR CMAKE_CONFIGURATION_TYPES))
@@ -170,6 +176,7 @@ set(SRC_FILES
     src/ui/Avatar.cc
     src/ui/Badge.cc
     src/ui/LoadingIndicator.cc
+    src/ui/InfoMessage.cpp
     src/ui/FlatButton.cc
     src/ui/FloatingButton.cc
     src/ui/Label.cc
@@ -234,7 +241,7 @@ if(NOT LMDBXX_INCLUDE_DIR)
                   $ENV{LIB_DIR}/include
                   $ENV{LIB_DIR}/include/lmdbxx)
 endif()
-include_directories(${LMDBXX_INCLUDE_DIR})
+include_directories(SYSTEM ${LMDBXX_INCLUDE_DIR})
 
 if(NOT TWEENY_INCLUDE_DIR)
     find_path(TWEENY_INCLUDE_DIR
@@ -244,7 +251,7 @@ if(NOT TWEENY_INCLUDE_DIR)
                   $ENV{LIB_DIR}/include/
                   $ENV{LIB_DIR}/include/tweeny)
 endif()
-include_directories(${TWEENY_INCLUDE_DIR})
+include_directories(SYSTEM ${TWEENY_INCLUDE_DIR})
 
 include_directories(include)
 include_directories(include/ui)
@@ -283,6 +290,7 @@ qt5_wrap_cpp(MOC_HEADERS
     include/ui/Avatar.h
     include/ui/Badge.h
     include/ui/LoadingIndicator.h
+    include/ui/InfoMessage.hpp
     include/ui/FlatButton.h
     include/ui/Label.h
     include/ui/FloatingButton.h
@@ -296,6 +304,8 @@ qt5_wrap_cpp(MOC_HEADERS
     include/ui/ToggleButton.h
     include/ui/Theme.h
     include/ui/ThemeManager.h
+
+    include/notifications/Manager.h
 
     include/AvatarProvider.h
     include/Cache.h
@@ -379,7 +389,7 @@ elseif(WIN32)
     target_link_libraries (nheko ${NTDLIB} ${NHEKO_LIBS} Qt5::WinMain)
 else()
     add_executable (nheko ${OS_BUNDLE} ${NHEKO_DEPS})
-    target_link_libraries (nheko ${NHEKO_LIBS})
+    target_link_libraries (nheko ${NHEKO_LIBS} Qt5::DBus)
 endif()
 
 if(EXTERNAL_PROJECT_DEPS)

@@ -23,6 +23,7 @@
 #include "ChatPage.h"
 #include "Config.h"
 #include "FloatingButton.h"
+#include "InfoMessage.hpp"
 #include "Logging.hpp"
 #include "Olm.hpp"
 #include "UserSettingsPage.h"
@@ -36,55 +37,19 @@
 
 using TimelineEvent = mtx::events::collections::TimelineEvents;
 
-DateSeparator::DateSeparator(QDateTime datetime, QWidget *parent)
-  : QWidget{parent}
+//! Retrieve the timestamp of the event represented by the given widget.
+QDateTime
+getDate(QWidget *widget)
 {
-        auto now  = QDateTime::currentDateTime();
-        auto days = now.daysTo(datetime);
+        auto item = qobject_cast<TimelineItem *>(widget);
+        if (item)
+                return item->descriptionMessage().datetime;
 
-        font_.setWeight(60);
-        font_.setPixelSize(conf::timeline::fonts::dateSeparator);
+        auto infoMsg = qobject_cast<InfoMessage *>(widget);
+        if (infoMsg)
+                return infoMsg->datetime();
 
-        QString fmt;
-
-        if (now.date().year() != datetime.date().year())
-                fmt = QString("ddd d MMMM yy");
-        else
-                fmt = QString("ddd d MMMM");
-
-        if (days == 0)
-                msg_ = tr("Today");
-        else if (std::abs(days) == 1)
-                msg_ = tr("Yesterday");
-        else
-                msg_ = datetime.toString(fmt);
-
-        QFontMetrics fm{font_};
-        width_  = fm.width(msg_) + HPadding * 2;
-        height_ = fm.ascent() + 2 * VPadding;
-
-        setFixedHeight(height_ + 2 * HMargin);
-}
-
-void
-DateSeparator::paintEvent(QPaintEvent *)
-{
-        QPainter p(this);
-        p.setRenderHint(QPainter::Antialiasing);
-        p.setFont(font_);
-
-        // Center the box horizontally & vertically.
-        auto textRegion = QRectF(width() / 2 - width_ / 2, HMargin, width_, height_);
-
-        QPainterPath ppath;
-        ppath.addRoundedRect(textRegion, height_ / 2, height_ / 2);
-
-        p.setPen(Qt::NoPen);
-        p.fillPath(ppath, boxColor());
-        p.drawPath(ppath);
-
-        p.setPen(QPen(textColor()));
-        p.drawText(textRegion, Qt::AlignCenter, msg_);
+        return QDateTime();
 }
 
 TimelineView::TimelineView(const mtx::responses::Timeline &timeline,
@@ -231,7 +196,7 @@ TimelineView::addBackwardsEvents(const mtx::responses::Messages &msgs)
         isPaginationInProgress_ = false;
 }
 
-TimelineItem *
+QWidget *
 TimelineView::parseMessageEvent(const mtx::events::collections::TimelineEvents &event,
                                 TimelineDirection direction)
 {
@@ -255,6 +220,12 @@ TimelineView::parseMessageEvent(const mtx::events::collections::TimelineEvents &
                 });
 
                 return nullptr;
+        } else if (mpark::holds_alternative<StateEvent<state::Encryption>>(event)) {
+                auto msg  = mpark::get<StateEvent<state::Encryption>>(event);
+                auto item = new InfoMessage(tr("Encryption is enabled"), this);
+                item->saveDatetime(QDateTime::fromMSecsSinceEpoch(msg.origin_server_ts));
+
+                return item;
         } else if (mpark::holds_alternative<RoomEvent<msg::Audio>>(event)) {
                 auto audio = mpark::get<RoomEvent<msg::Audio>>(event);
                 return processMessageEvent<AudioEvent, AudioItem>(audio, direction);
@@ -280,15 +251,26 @@ TimelineView::parseMessageEvent(const mtx::events::collections::TimelineEvents &
                 return processMessageEvent<Sticker, StickerItem>(mpark::get<Sticker>(event),
                                                                  direction);
         } else if (mpark::holds_alternative<EncryptedEvent<msg::Encrypted>>(event)) {
-                auto decrypted =
-                  parseEncryptedEvent(mpark::get<EncryptedEvent<msg::Encrypted>>(event));
-                return parseMessageEvent(decrypted, direction);
+                auto res = parseEncryptedEvent(mpark::get<EncryptedEvent<msg::Encrypted>>(event));
+                auto widget = parseMessageEvent(res.event, direction);
+
+                if (widget == nullptr)
+                        return nullptr;
+
+                auto item = qobject_cast<TimelineItem *>(widget);
+
+                if (item && res.isDecrypted)
+                        item->markReceived(true);
+                else if (item && !res.isDecrypted)
+                        item->addKeyRequestAction();
+
+                return widget;
         }
 
         return nullptr;
 }
 
-TimelineEvent
+DecryptionResult
 TimelineView::parseEncryptedEvent(const mtx::events::EncryptedEvent<mtx::events::msg::Encrypted> &e)
 {
         MegolmSessionIndex index;
@@ -309,12 +291,12 @@ TimelineView::parseEncryptedEvent(const mtx::events::EncryptedEvent<mtx::events:
                                               index.session_id,
                                               e.sender);
                         // TODO: request megolm session_id & session_key from the sender.
-                        return dummy;
+                        return {dummy, false};
                 }
         } catch (const lmdb::error &e) {
                 nhlog::db()->critical("failed to check megolm session's existence: {}", e.what());
                 dummy.content.body = "-- Decryption Error (failed to communicate with DB) --";
-                return dummy;
+                return {dummy, false};
         }
 
         std::string msg_str;
@@ -330,7 +312,7 @@ TimelineView::parseEncryptedEvent(const mtx::events::EncryptedEvent<mtx::events:
                                       e.what());
                 dummy.content.body =
                   "-- Decryption Error (failed to retrieve megolm keys from db) --";
-                return dummy;
+                return {dummy, false};
         } catch (const mtx::crypto::olm_exception &e) {
                 nhlog::crypto()->critical("failed to decrypt message with index ({}, {}, {}): {}",
                                           index.room_id,
@@ -338,7 +320,7 @@ TimelineView::parseEncryptedEvent(const mtx::events::EncryptedEvent<mtx::events:
                                           index.sender_key,
                                           e.what());
                 dummy.content.body = "-- Decryption Error (" + std::string(e.what()) + ") --";
-                return dummy;
+                return {dummy, false};
         }
 
         // Add missing fields for the event.
@@ -358,10 +340,10 @@ TimelineView::parseEncryptedEvent(const mtx::events::EncryptedEvent<mtx::events:
         mtx::responses::utils::parse_timeline_events(event_array, events);
 
         if (events.size() == 1)
-                return events.at(0);
+                return {events.at(0), true};
 
         dummy.content.body = "-- Encrypted Event (Unknown event type) --";
-        return dummy;
+        return {dummy, false};
 }
 
 void
@@ -370,7 +352,7 @@ TimelineView::renderBottomEvents(const std::vector<TimelineEvent> &events)
         int counter = 0;
 
         for (const auto &event : events) {
-                TimelineItem *item = parseMessageEvent(event, TimelineDirection::Bottom);
+                QWidget *item = parseMessageEvent(event, TimelineDirection::Bottom);
 
                 if (item != nullptr) {
                         addTimelineItem(item, TimelineDirection::Bottom);
@@ -391,7 +373,7 @@ TimelineView::renderBottomEvents(const std::vector<TimelineEvent> &events)
 void
 TimelineView::renderTopEvents(const std::vector<TimelineEvent> &events)
 {
-        std::vector<TimelineItem *> items;
+        std::vector<QWidget *> items;
 
         // Reset the sender of the first message in the timeline
         // cause we're about to insert a new one.
@@ -404,7 +386,7 @@ TimelineView::renderTopEvents(const std::vector<TimelineEvent> &events)
         while (ii != 0) {
                 --ii;
 
-                TimelineItem *item = parseMessageEvent(events[ii], TimelineDirection::Top);
+                auto item = parseMessageEvent(events[ii], TimelineDirection::Top);
 
                 if (item != nullptr)
                         items.push_back(item);
@@ -425,9 +407,16 @@ TimelineView::renderTopEvents(const std::vector<TimelineEvent> &events)
 
         // If this batch is the first being rendered (i.e the first and the last
         // events originate from this batch), set the last sender.
-        if (lastSender_.isEmpty() && !items.empty())
-                saveLastMessageInfo(items.at(0)->descriptionMessage().userid,
-                                    items.at(0)->descriptionMessage().datetime);
+        if (lastSender_.isEmpty() && !items.empty()) {
+                for (const auto &w : items) {
+                        auto timelineItem = qobject_cast<TimelineItem *>(w);
+                        if (timelineItem) {
+                                saveLastMessageInfo(timelineItem->descriptionMessage().userid,
+                                                    timelineItem->descriptionMessage().datetime);
+                                break;
+                        }
+                }
+        }
 }
 
 void
@@ -565,17 +554,16 @@ TimelineView::isSenderRendered(const QString &user_id,
 }
 
 void
-TimelineView::addTimelineItem(TimelineItem *item, TimelineDirection direction)
+TimelineView::addTimelineItem(QWidget *item, TimelineDirection direction)
 {
-        const auto newDate = item->descriptionMessage().datetime;
+        const auto newDate = getDate(item);
 
         if (direction == TimelineDirection::Bottom) {
                 const auto lastItemPosition = scroll_layout_->count() - 1;
-                auto lastItem =
-                  qobject_cast<TimelineItem *>(scroll_layout_->itemAt(lastItemPosition)->widget());
+                const auto lastItem         = scroll_layout_->itemAt(lastItemPosition)->widget();
 
                 if (lastItem) {
-                        auto oldDate = lastItem->descriptionMessage().datetime;
+                        const auto oldDate = getDate(lastItem);
 
                         if (oldDate.daysTo(newDate) != 0) {
                                 auto separator = new DateSeparator(newDate, this);
@@ -590,11 +578,10 @@ TimelineView::addTimelineItem(TimelineItem *item, TimelineDirection direction)
                 // The first item (position 0) is a stretch widget that pushes
                 // the widgets to the bottom of the page.
                 if (scroll_layout_->count() > 1) {
-                        auto firstItem =
-                          qobject_cast<TimelineItem *>(scroll_layout_->itemAt(1)->widget());
+                        const auto firstItem = scroll_layout_->itemAt(1)->widget();
 
                         if (firstItem) {
-                                auto oldDate = firstItem->descriptionMessage().datetime;
+                                const auto oldDate = getDate(firstItem);
 
                                 if (newDate.daysTo(oldDate) != 0) {
                                         auto separator = new DateSeparator(oldDate);
@@ -1110,6 +1097,8 @@ toRoomMessage<mtx::events::msg::Image>(const PendingMessage &m)
         image.info.size     = m.media_size;
         image.body          = m.filename.toStdString();
         image.url           = m.body.toStdString();
+        image.info.h        = m.dimensions.height();
+        image.info.w        = m.dimensions.width();
         return image;
 }
 
@@ -1463,5 +1452,7 @@ TimelineView::handleClaimedKeys(std::shared_ptr<StateKeeper> keeper,
                                              "message: {}",
                                              err->matrix_error.error);
                   }
+
+                  (void)keeper;
           });
 }

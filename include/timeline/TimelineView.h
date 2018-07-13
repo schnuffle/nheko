@@ -46,6 +46,14 @@ private:
         std::function<void()> fn_;
 };
 
+struct DecryptionResult
+{
+        //! The decrypted content as a normal plaintext event.
+        utils::TimelineEvent event;
+        //! Whether or not the decryption was successful.
+        bool isDecrypted = false;
+};
+
 class FloatingButton;
 struct DescInfo;
 
@@ -61,6 +69,7 @@ struct PendingMessage
         uint64_t media_size;
         QString event_id;
         TimelineItem *widget;
+        QSize dimensions;
         bool is_encrypted = false;
 };
 
@@ -99,40 +108,6 @@ enum class TimelineDirection
         Bottom,
 };
 
-class DateSeparator : public QWidget
-{
-        Q_OBJECT
-
-        Q_PROPERTY(QColor textColor WRITE setTextColor READ textColor)
-        Q_PROPERTY(QColor boxColor WRITE setBoxColor READ boxColor)
-
-public:
-        DateSeparator(QDateTime datetime, QWidget *parent = nullptr);
-
-        void setTextColor(QColor color) { textColor_ = color; }
-        void setBoxColor(QColor color) { boxColor_ = color; }
-
-        QColor textColor() const { return textColor_; }
-        QColor boxColor() const { return boxColor_; }
-
-protected:
-        void paintEvent(QPaintEvent *event) override;
-
-private:
-        static constexpr int VPadding = 6;
-        static constexpr int HPadding = 12;
-        static constexpr int HMargin  = 20;
-
-        int width_;
-        int height_;
-
-        QString msg_;
-        QFont font_;
-
-        QColor textColor_ = QColor("black");
-        QColor boxColor_  = QColor("white");
-};
-
 class TimelineView : public QWidget
 {
         Q_OBJECT
@@ -151,10 +126,10 @@ public:
         void addUserMessage(const QString &url,
                             const QString &filename,
                             const QString &mime,
-                            uint64_t size);
+                            uint64_t size,
+                            const QSize &dimensions = QSize());
         void updatePendingMessage(const std::string &txn_id, const QString &event_id);
         void scrollDown();
-        QLabel *createDateSeparator(QDateTime datetime);
 
         //! Remove an item from the timeline with the given Event ID.
         void removeEvent(const QString &event_id);
@@ -192,7 +167,7 @@ private:
 
         QWidget *relativeWidget(TimelineItem *item, int dt) const;
 
-        TimelineEvent parseEncryptedEvent(
+        DecryptionResult parseEncryptedEvent(
           const mtx::events::EncryptedEvent<mtx::events::msg::Encrypted> &e);
 
         void handleClaimedKeys(std::shared_ptr<StateKeeper> keeper,
@@ -212,7 +187,7 @@ private:
         void getMessages();
         //! HACK: Fixing layout flickering when adding to the bottom
         //! of the timeline.
-        void pushTimelineItem(TimelineItem *item)
+        void pushTimelineItem(QWidget *item)
         {
                 item->hide();
                 scroll_layout_->addWidget(item);
@@ -222,7 +197,7 @@ private:
         //! Decides whether or not to show or hide the scroll down button.
         void toggleScrollDownButton();
         void init();
-        void addTimelineItem(TimelineItem *item,
+        void addTimelineItem(QWidget *item,
                              TimelineDirection direction = TimelineDirection::Bottom);
         void updateLastSender(const QString &user_id, TimelineDirection direction);
         void notifyForLastEvent();
@@ -287,8 +262,8 @@ private:
                               const QDateTime &second = QDateTime::currentDateTime()) const;
 
         // Return nullptr if the event couldn't be parsed.
-        TimelineItem *parseMessageEvent(const mtx::events::collections::TimelineEvents &event,
-                                        TimelineDirection direction);
+        QWidget *parseMessageEvent(const mtx::events::collections::TimelineEvents &event,
+                                   TimelineDirection direction);
 
         QVBoxLayout *top_layout_;
         QVBoxLayout *scroll_layout_;
@@ -348,7 +323,8 @@ void
 TimelineView::addUserMessage(const QString &url,
                              const QString &filename,
                              const QString &mime,
-                             uint64_t size)
+                             uint64_t size,
+                             const QSize &dimensions)
 {
         auto with_sender = (lastSender_ != local_user_) || isDateDifference(lastMsgTimestamp_);
         auto trimmed     = QFileInfo{filename}.fileName(); // Trim file path.
@@ -373,6 +349,7 @@ TimelineView::addUserMessage(const QString &url,
         message.mime       = mime;
         message.media_size = size;
         message.widget     = view_item;
+        message.dimensions = dimensions;
 
         handleNewUserMessage(message);
 }

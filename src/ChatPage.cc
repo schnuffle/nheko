@@ -16,6 +16,7 @@
  */
 
 #include <QApplication>
+#include <QImageReader>
 #include <QSettings>
 #include <QtConcurrent>
 
@@ -55,6 +56,7 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QWidget *parent)
   : QWidget(parent)
   , isConnected_(true)
   , userSettings_{userSettings}
+  , notificationsManager(this)
 {
         setObjectName("chatPage");
 
@@ -283,48 +285,52 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QWidget *parent)
 
         connect(text_input_, &TextInputWidget::sendJoinRoomRequest, this, &ChatPage::joinRoom);
 
-        connect(text_input_,
-                &TextInputWidget::uploadImage,
-                this,
-                [this](QSharedPointer<QIODevice> dev, const QString &fn) {
-                        QMimeDatabase db;
-                        QMimeType mime = db.mimeTypeForData(dev.data());
+        connect(
+          text_input_,
+          &TextInputWidget::uploadImage,
+          this,
+          [this](QSharedPointer<QIODevice> dev, const QString &fn) {
+                  QMimeDatabase db;
+                  QMimeType mime = db.mimeTypeForData(dev.data());
 
-                        if (!dev->open(QIODevice::ReadOnly)) {
-                                emit uploadFailed(
-                                  QString("Error while reading media: %1").arg(dev->errorString()));
-                                return;
-                        }
+                  if (!dev->open(QIODevice::ReadOnly)) {
+                          emit uploadFailed(
+                            QString("Error while reading media: %1").arg(dev->errorString()));
+                          return;
+                  }
 
-                        auto bin     = dev->readAll();
-                        auto payload = std::string(bin.data(), bin.size());
+                  auto bin        = dev->peek(dev->size());
+                  auto payload    = std::string(bin.data(), bin.size());
+                  auto dimensions = QImageReader(dev.data()).size();
 
-                        http::v2::client()->upload(
-                          payload,
-                          mime.name().toStdString(),
-                          QFileInfo(fn).fileName().toStdString(),
-                          [this,
-                           room_id  = current_room_,
-                           filename = fn,
-                           mime     = mime.name(),
-                           size     = payload.size()](const mtx::responses::ContentURI &res,
-                                                  mtx::http::RequestErr err) {
-                                  if (err) {
-                                          emit uploadFailed(
-                                            tr("Failed to upload image. Please try again."));
-                                          nhlog::net()->warn("failed to upload image: {} ({})",
-                                                             err->matrix_error.error,
-                                                             static_cast<int>(err->status_code));
-                                          return;
-                                  }
+                  http::v2::client()->upload(
+                    payload,
+                    mime.name().toStdString(),
+                    QFileInfo(fn).fileName().toStdString(),
+                    [this,
+                     room_id  = current_room_,
+                     filename = fn,
+                     mime     = mime.name(),
+                     size     = payload.size(),
+                     dimensions](const mtx::responses::ContentURI &res, mtx::http::RequestErr err) {
+                            if (err) {
+                                    emit uploadFailed(
+                                      tr("Failed to upload image. Please try again."));
+                                    nhlog::net()->warn("failed to upload image: {} {} ({})",
+                                                       err->matrix_error.error,
+                                                       to_string(err->matrix_error.errcode),
+                                                       static_cast<int>(err->status_code));
+                                    return;
+                            }
 
-                                  emit imageUploaded(room_id,
-                                                     filename,
-                                                     QString::fromStdString(res.content_uri),
-                                                     mime,
-                                                     size);
-                          });
-                });
+                            emit imageUploaded(room_id,
+                                               filename,
+                                               QString::fromStdString(res.content_uri),
+                                               mime,
+                                               size,
+                                               dimensions);
+                    });
+          });
 
         connect(text_input_,
                 &TextInputWidget::uploadFile,
@@ -461,9 +467,15 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QWidget *parent)
         connect(this,
                 &ChatPage::imageUploaded,
                 this,
-                [this](QString roomid, QString filename, QString url, QString mime, qint64 dsize) {
+                [this](QString roomid,
+                       QString filename,
+                       QString url,
+                       QString mime,
+                       qint64 dsize,
+                       QSize dimensions) {
                         text_input_->hideUploadSpinner();
-                        view_manager_->queueImageMessage(roomid, filename, url, mime, dsize);
+                        view_manager_->queueImageMessage(
+                          roomid, filename, url, mime, dsize, dimensions);
                 });
         connect(this,
                 &ChatPage::fileUploaded,
@@ -528,6 +540,15 @@ ChatPage::ChatPage(QSharedPointer<UserSettings> userSettings, QWidget *parent)
                                 room_list_->setFilterRooms(false);
                         else
                                 room_list_->setRoomFilter(communities_[communityId]->getRoomList());
+                });
+
+        connect(&notificationsManager,
+                &NotificationsManager::notificationClicked,
+                this,
+                [this](const QString &roomid, const QString &eventid) {
+                        Q_UNUSED(eventid)
+                        room_list_->highlightSelectedRoom(roomid);
+                        activateWindow();
                 });
 
         setGroupViewState(userSettings_->isGroupViewEnabled());
@@ -987,11 +1008,14 @@ ChatPage::sendDesktopNotifications(const mtx::responses::Notifications &res)
                                 if (isRoomActive(room_id))
                                         continue;
 
-                                NotificationsManager::postNotification(
+                                notificationsManager.postNotification(
+                                  room_id,
+                                  QString::fromStdString(event_id),
                                   QString::fromStdString(
                                     cache::client()->singleRoomInfo(item.room_id).name),
                                   Cache::displayName(room_id, user_id),
-                                  utils::event_body(item.event));
+                                  utils::event_body(item.event),
+                                  cache::client()->getRoomAvatar(room_id));
                         }
                 } catch (const lmdb::error &e) {
                         nhlog::db()->warn("error while sending desktop notification: {}", e.what());
